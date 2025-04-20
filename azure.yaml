@@ -1,0 +1,10 @@
+name: weather-mcp-server
+metadata:
+  template: weather-mcp-server@0.1.0
+services:
+  app:
+    project: .
+    language: js
+    host: containerapp
+    docker:
+      path: ./Dockerfile
