@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MCP Inspector</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        line-height: 1.6;
+      }
+      h1 {
+        color: #333;
+      }
+      .container {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .card {
+        background: #f9f9f9;
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      label {
+        font-weight: bold;
+      }
+      input,
+      select,
+      button {
+        padding: 8px;
+        border-radius: 4px;
+        border: 1px solid #ccc;
+      }
+      button {
+        cursor: pointer;
+        background: #0078d7;
+        color: white;
+        border: none;
+      }
+      button:hover {
+        background: #0066b3;
+      }
+      #events {
+        background: #f0f0f0;
+        border-radius: 4px;
+        padding: 12px;
+        height: 300px;
+        overflow-y: auto;
+        font-family: monospace;
+        white-space: pre-wrap;
+      }
+      .success {
+        color: green;
+      }
+      .error {
+        color: red;
+      }
+      .info {
+        color: blue;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>MCP Inspector</h1>
+    <div class="container">
+      <div class="card">
+        <div class="input-group">
+          <label for="server-url">Server URL:</label>
+          <input
+            type="text"
+            id="server-url"
+            value="http://localhost:8080/sse"
+            placeholder="MCP Server SSE Endpoint"
+          />
+        </div>
+      </div>
+
+      <div class="card">
+        <button id="connect-btn">Connect to MCP Server</button>
+        <button id="disconnect-btn" disabled>Disconnect</button>
+      </div>
+
+      <div class="card">
+        <h3>Tool Testing</h3>
+        <div class="input-group">
+          <label for="tool-select">Select Tool:</label>
+          <select id="tool-select">
+            <option value="get-nz-forecast">Get NZ Forecast</option>
+            <option value="get-forecast">Get Forecast by Coordinates</option>
+            <option value="get-alerts">Get Weather Alerts</option>
+          </select>
+        </div>
+
+        <div id="params-container" class="input-group">
+          <!-- Parameters will be dynamically injected here -->
+        </div>
+
+        <button id="run-tool-btn" disabled>Run Tool</button>
+      </div>
+
+      <div class="card">
+        <h3>Server Events</h3>
+        <div id="events"></div>
+      </div>
+    </div>
+
+    <script>
+      // DOM Elements
+      const serverUrlInput = document.getElementById("server-url");
+      const connectBtn = document.getElementById("connect-btn");
+      const disconnectBtn = document.getElementById("disconnect-btn");
+      const eventsContainer = document.getElementById("events");
+      const toolSelect = document.getElementById("tool-select");
+      const paramsContainer = document.getElementById("params-container");
+      const runToolBtn = document.getElementById("run-tool-btn");
+
+      // State
+      let eventSource = null;
+      let messageCount = 0;
+      let capabilities = null;
+
+      // Tool parameter definitions
+      const toolParams = {
+        "get-nz-forecast": [
+          {
+            name: "city",
+            type: "string",
+            label: "City Name",
+            placeholder: "e.g., Auckland, Wellington",
+          },
+        ],
+        "get-forecast": [
+          {
+            name: "latitude",
+            type: "number",
+            label: "Latitude",
+            placeholder: "-36.8509",
+          },
+          {
+            name: "longitude",
+            type: "number",
+            label: "Longitude",
+            placeholder: "174.7645",
+          },
+        ],
+        "get-alerts": [
+          {
+            name: "state",
+            type: "string",
+            label: "State Code",
+            placeholder: "e.g., CA, NY",
+          },
+        ],
+      };
+
+      // Helper functions
+      function logEvent(message, type = "info") {
+        const timestamp = new Date().toLocaleTimeString();
+        eventsContainer.innerHTML += `<div class="${type}">[${timestamp}] ${message}</div>`;
+        eventsContainer.scrollTop = eventsContainer.scrollHeight;
+      }
+
+      function updateParamsUI() {
+        paramsContainer.innerHTML = "";
+        const selectedTool = toolSelect.value;
+        const params = toolParams[selectedTool] || [];
+
+        params.forEach((param) => {
+          const div = document.createElement("div");
+          div.innerHTML = `
+                    <label for="param-${param.name}">${param.label}:</label>
+                    <input type="${
+                      param.type === "number" ? "number" : "text"
+                    }" 
+                           id="param-${param.name}" 
+                           placeholder="${param.placeholder || ""}" 
+                           class="tool-param">
+                `;
+          paramsContainer.appendChild(div);
+        });
+      }
+
+      // Initialize parameters UI
+      updateParamsUI();
+
+      // Event Handlers
+      toolSelect.addEventListener("change", updateParamsUI);
+
+      connectBtn.addEventListener("click", () => {
+        const serverUrl = serverUrlInput.value.trim();
+        if (!serverUrl) {
+          logEvent("Please enter a valid server URL", "error");
+          return;
+        }
+
+        try {
+          // Connect to the SSE endpoint
+          eventSource = new EventSource(serverUrl);
+          logEvent(`Connecting to ${serverUrl}...`);
+
+          eventSource.onopen = () => {
+            logEvent("Connection established!", "success");
+            connectBtn.disabled = true;
+            disconnectBtn.disabled = false;
+            runToolBtn.disabled = false;
+          };
+
+          eventSource.onerror = (error) => {
+            logEvent(`Connection error: ${JSON.stringify(error)}`, "error");
+            disconnectEventSource();
+          };
+
+          // Listen for server events
+          eventSource.addEventListener("message", (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              logEvent(`Received message: ${JSON.stringify(data, null, 2)}`);
+
+              // Handle capabilities message
+              if (data.jsonrpc === "2.0" && data.method === "capabilities") {
+                capabilities = data.params;
+                logEvent(
+                  `Server capabilities received: ${Object.keys(
+                    data.params.tools || {}
+                  ).join(", ")}`,
+                  "success"
+                );
+              }
+            } catch (err) {
+              logEvent(`Failed to parse message: ${event.data}`, "error");
+            }
+          });
+
+          // Standard events
+          ["resourceUpdate", "toolResponse", "error"].forEach((eventName) => {
+            eventSource.addEventListener(eventName, (event) => {
+              try {
+                const data = JSON.parse(event.data);
+                logEvent(`${eventName}: ${JSON.stringify(data, null, 2)}`);
+              } catch (err) {
+                logEvent(
+                  `Failed to parse ${eventName} event: ${event.data}`,
+                  "error"
+                );
+              }
+            });
+          });
+        } catch (err) {
+          logEvent(`Failed to connect: ${err.message}`, "error");
+        }
+      });
+
+      disconnectBtn.addEventListener("click", () => {
+        disconnectEventSource();
+      });
+
+      runToolBtn.addEventListener("click", () => {
+        const selectedTool = toolSelect.value;
+        const params = toolParams[selectedTool] || [];
+
+        // Collect parameter values
+        const parameters = {};
+        params.forEach((param) => {
+          const input = document.getElementById(`param-${param.name}`);
+          if (input) {
+            let value = input.value;
+            if (param.type === "number" && value) {
+              value = parseFloat(value);
+            }
+            parameters[param.name] = value;
+          }
+        });
+
+        // Build the tool request
+        const request = {
+          jsonrpc: "2.0",
+          id: String(++messageCount),
+          method: "tool",
+          params: {
+            name: selectedTool,
+            parameters,
+          },
+        };
+
+        // Send the request
+        sendMcpRequest(request);
+      });
+
+      function sendMcpRequest(request) {
+        const serverUrl = serverUrlInput.value.trim();
+        if (!serverUrl) {
+          logEvent("Server URL is not defined", "error");
+          return;
+        }
+
+        // Extract base URL from SSE URL
+        const baseUrl = serverUrl.replace(/\/sse$/, "");
+        const messagesUrl = `${baseUrl}/messages`;
+
+        logEvent(`Sending request: ${JSON.stringify(request, null, 2)}`);
+
+        fetch(messagesUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(request),
+        })
+          .then((response) => {
+            if (response.ok) {
+              logEvent("Request sent successfully", "success");
+            } else {
+              return response.text().then((text) => {
+                throw new Error(`Server returned ${response.status}: ${text}`);
+              });
+            }
+          })
+          .catch((error) => {
+            logEvent(`Error sending request: ${error.message}`, "error");
+          });
+      }
+
+      function disconnectEventSource() {
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+          logEvent("Disconnected from server");
+          connectBtn.disabled = false;
+          disconnectBtn.disabled = true;
+          runToolBtn.disabled = true;
+        }
+      }
+
+      // Clean up on page unload
+      window.addEventListener("beforeunload", disconnectEventSource);
+    </script>
+  </body>
+</html>
