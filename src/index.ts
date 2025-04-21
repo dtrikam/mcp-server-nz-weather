@@ -27,6 +27,7 @@ const useHttp =
 
 if (useHttp) {
   log("Starting in HTTP mode for SSE transport...");
+  log("MCP Inspector can connect to: http://localhost:8080/sse");
   import("./http-server.js");
 } else {
   // Create server instance using the utility function
