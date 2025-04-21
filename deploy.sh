@@ -55,8 +55,13 @@ echo "Building and pushing Docker image to ACR..."
 docker build --platform linux/amd64 -t $ACR_LOGIN_SERVER/nzweather-mcp:latest .
 docker push $ACR_LOGIN_SERVER/nzweather-mcp:latest
 
-# Verify the image exists
-echo "Verifying image exists in registry..."
+# Build and push Claude-compatible Docker image
+echo "Building and pushing Claude-compatible Docker image to ACR..."
+docker build --platform linux/amd64 -t $ACR_LOGIN_SERVER/nzweather-mcp-claude:latest -f Dockerfile.claude .
+docker push $ACR_LOGIN_SERVER/nzweather-mcp-claude:latest
+
+# Verify the images exist
+echo "Verifying images exist in registry..."
 IMAGE_EXISTS=$(az acr repository show --name $ACR_NAME --image nzweather-mcp:latest --query name -o tsv 2>/dev/null || echo "not_found")
 if [ "$IMAGE_EXISTS" == "not_found" ]; then
   echo "Failed to find image in ACR. Deployment cannot continue."
